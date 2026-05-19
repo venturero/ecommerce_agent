@@ -17,6 +17,7 @@ from .market import (
 )
 from .models import Intent, ParseStatus, SearchResult
 from .parse_policy import apply_budget_filter
+from .retailer_preference import prefers_retailer, retailer_only
 from .serpapi_client import SerpApiClient, SerpApiSearchError
 from .trendyol_search import TrendyolNativeSearch
 
@@ -42,17 +43,28 @@ class MultiEngineRetriever:
         parse_status: ParseStatus,
     ) -> list[SearchResult]:
         results: list[SearchResult] = []
+        only = retailer_only(intent)
+        run_amazon = self._settings.use_amazon_search and only != "trendyol"
+        run_trendyol = self._settings.use_trendyol_native and only != "amazon"
 
-        if self._settings.use_amazon_search:
+        if run_amazon:
             results.extend(self._safe(self._search_amazon, primary_query, intent, parse_status))
 
         trendyol_results: list[SearchResult] = []
-        if self._settings.use_trendyol_native:
+        if run_trendyol:
             for query in trendyol_queries:
                 trendyol_results.extend(self._safe_trendyol(query, intent, parse_status))
         results.extend(trendyol_results)
 
-        if self._settings.use_trendyol_serpapi_fallback and len(trendyol_results) < self._settings.trendyol_fallback_min_results:
+        need_trendyol_fallback = (
+            self._settings.use_trendyol_serpapi_fallback
+            and run_trendyol
+            and (
+                prefers_retailer(intent, "trendyol")
+                or len(trendyol_results) < self._settings.trendyol_fallback_min_results
+            )
+        )
+        if need_trendyol_fallback:
             for query in trendyol_queries[:2]:
                 results.extend(
                     self._safe(self._search_trendyol_serpapi_fallback, query, intent, parse_status)
@@ -75,11 +87,12 @@ class MultiEngineRetriever:
     def _search_trendyol_serpapi_fallback(
         self, query: str, intent: Intent, parse_status: ParseStatus
     ) -> list[SearchResult]:
-        """SerpApi fallback: Google Shopping filtered to Trendyol merchant links only."""
+        """SerpApi fallback: Google Shopping results from Trendyol merchants (immersive resolve)."""
         market = market_for_search(intent)
+        # site:trendyol.com on google_shopping often returns zero items; filter by merchant instead.
         params: dict = {
             "engine": "google_shopping",
-            "q": f"{query} site:trendyol.com",
+            "q": query,
             "gl": market.country_code,
             "hl": market.language,
             "num": self._settings.shopping_results_per_query,

@@ -39,6 +39,7 @@ class Intent:
     location: str | None = None
     country_code: str | None = None
     language: str | None = None
+    retailer_include: list[str] = field(default_factory=list)
 
 
 @dataclass

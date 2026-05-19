@@ -27,10 +27,14 @@ class QueryGenerator:
 
         base = self.primary_query(intent, parse_meta)
         market = market_for_search(intent)
-        queries = [base]
+        queries: list[str] = []
+        if market.country_code == "tr" and intent.product_type:
+            turkish = self._turkish_query(intent)
+            if turkish:
+                queries.append(turkish)
+        queries.append(base)
 
         if market.country_code == "tr" and intent.product_type:
-            queries.append(self._turkish_query(intent))
             max_try = budget_limit_try(intent.budget_amount, intent.budget_currency)
             if max_try and parse_meta.status in ("ok", "partial"):
                 queries.append(f"{base} {max_try} TL altı")
@@ -51,13 +55,32 @@ class QueryGenerator:
     @staticmethod
     def _turkish_query(intent: Intent) -> str:
         if not intent.product_type:
-            return intent.original_query
+            return intent.original_query.strip()
+        lowered = intent.product_type.lower()
+        attrs = {k.lower(): str(v).lower() for k, v in intent.attributes.items()}
+        must_blob = " ".join(intent.must_have).lower()
+        attr_blob = " ".join(attrs.keys()) + " " + " ".join(attrs.values())
+
+        def mentions(*terms: str) -> bool:
+            blob = f"{must_blob} {attr_blob}"
+            return any(term in blob for term in terms)
+
+        if any(token in lowered for token in ("tshirt", "t-shirt", "tişört", "tisort")):
+            parts: list[str] = []
+            if mentions("white", "beyaz") or attrs.get("color") in ("white", "beyaz"):
+                parts.append("beyaz")
+            if mentions("armless", "kolsuz", "sleeveless", "tank"):
+                parts.append("kolsuz")
+            if mentions("man", "men", "erkek", "male"):
+                parts.append("erkek")
+            parts.append("tshirt")
+            return " ".join(parts)
+
         mapping = {
             "running shoes": "su geçirmez koşu ayakkabısı",
             "sneaker": "su geçirmez spor ayakkabı",
             "shoes": "su geçirmez ayakkabı",
         }
-        lowered = intent.product_type.lower()
         for key, tr in mapping.items():
             if key in lowered:
                 if "waterproof" in {k.lower() for k in intent.attributes} or any(

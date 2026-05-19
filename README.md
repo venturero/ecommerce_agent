@@ -204,6 +204,21 @@ gunicorn --bind 0.0.0.0:${PORT:-5000} --workers 2 --timeout 120 shopping_search_
 2. Start command: use the gunicorn line above, or point the platform at [`Procfile`](Procfile).
 3. Env: at minimum `SERP_API_KEY`, `FLASK_SECRET_KEY`, and `OPENAI_API_KEY` (recommended).
 
+### Render.com
+
+In the [Render Dashboard](https://dashboard.render.com) → your web service → **Settings**:
+
+| Setting | Value |
+|--------|--------|
+| **Build Command** | `pip install -r requirements.txt && pip install -e .` |
+| **Start Command** | `gunicorn --bind 0.0.0.0:$PORT --workers 2 --timeout 120 shopping_search_agent.chat_app:app` |
+
+**Environment** (same keys as [`.env.example`](.env.example)): at minimum `SERP_API_KEY`, `FLASK_SECRET_KEY`, `OPENAI_API_KEY`.
+
+**Common failure:** `ModuleNotFoundError: No module named 'shopping_search_agent'` means the build step skipped `pip install -e .` (dependencies alone are not enough; the app lives under `src/`).
+
+Optional: commit [`.python-version`](.python-version) (`3.12.8`) so Render does not default to an experimental Python. [`render.yaml`](render.yaml) documents the same settings for new Blueprint deploys.
+
 ## Push to GitHub
 
 Target repository: [venturero/ecommerce_agent](https://github.com/venturero/ecommerce_agent)

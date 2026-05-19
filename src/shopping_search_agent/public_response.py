@@ -23,6 +23,7 @@ def empty_constraints() -> dict:
         "budget_amount": None,
         "budget_currency": None,
         "usage": None,
+        "retailer_include": [],
     }
 
 
@@ -46,6 +47,7 @@ def constraints_from_intent(intent: Intent) -> dict:
         "budget_amount": intent.budget_amount,
         "budget_currency": intent.budget_currency,
         "usage": intent.usage,
+        "retailer_include": intent.retailer_include,
     }
 
 

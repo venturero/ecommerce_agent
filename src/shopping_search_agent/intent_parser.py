@@ -4,6 +4,7 @@ import re
 
 from .budget_currency import currency_confirmation_question, resolve_budget_currency
 from .constraint_negation import apply_negation_heuristics
+from .retailer_preference import merge_retailer_preferences
 from .llm import LLMClient
 from .market import normalize_market
 from .models import Intent, ParseMeta, ParseStatus
@@ -12,7 +13,9 @@ _INTENT_PROMPT = (
     "Extract shopping intent as JSON. Keys: "
     "product_type(string|null), attributes(object), brand_include(array of strings), "
     "brand_exclude(array of strings), must_have(array of strings - hard requirements), "
-    "nice_to_have(array of strings - soft preferences), usage(string|null), location(string|null), "
+    "nice_to_have(array of strings - soft preferences), "
+    "retailer_include(array of strings - when user names a store/marketplace, e.g. trendyol, amazon), "
+    "usage(string|null), location(string|null), "
     "country_code(2-letter|null), language(2-letter|null), "
     "budget_amount(number|null), budget_currency(USD|TRY|EUR|null), budget(string|null). "
     "Infer country_code and language from city/country when explicitly mentioned. "
@@ -48,6 +51,7 @@ class IntentParser:
             )
             intent.brand_include = brand_include
             intent.brand_exclude = brand_exclude
+            intent = merge_retailer_preferences(intent, user_query)
 
             budget_resolution = resolve_budget_currency(intent, user_query)
             return intent, _evaluate_parse(user_query, intent, data, budget_resolution)
@@ -105,6 +109,7 @@ def _intent_from_llm_data(user_query: str, data: dict) -> Intent:
         location=_optional_str(data.get("location")),
         country_code=country_code,
         language=language,
+        retailer_include=_norm_str_list(data.get("retailer_include")),
     )
 
 

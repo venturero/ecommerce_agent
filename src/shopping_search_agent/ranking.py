@@ -20,6 +20,18 @@ from .parse_policy import (
     apply_must_have_filter,
     apply_strict_score_boosts,
 )
+from .retailer_preference import result_matches_retailer_preferences
+
+
+_MUST_HAVE_VARIANTS: dict[str, tuple[str, ...]] = {
+    "armless": ("armless", "kolsuz", "sleeveless", "sızır kol", "sifir kol", "sıfır kol", "tank"),
+    "white": ("white", "beyaz"),
+    "black": ("black", "siyah"),
+    "man": ("man", "men", "erkek", "male"),
+    "men": ("man", "men", "erkek", "male"),
+    "woman": ("woman", "women", "kadın", "kadin", "female"),
+    "women": ("woman", "women", "kadın", "kadin", "female"),
+}
 
 
 class RankingFilter:
@@ -47,8 +59,11 @@ class RankingFilter:
         market = market_for_search(intent)
         status = parse_meta.status
         deduped = self._dedupe(results)
+        use_tr_variants = market.country_code == "tr" or bool(intent.retailer_include)
         scored: list[RankedLink] = []
         for item in deduped:
+            if not result_matches_retailer_preferences(item.domain, intent.retailer_include):
+                continue
             if not is_allowed_retailer_domain(item.domain, market.country_code):
                 continue
             if item.in_stock is False:
@@ -62,7 +77,7 @@ class RankingFilter:
                 if not self._matches_any(haystack, intent.brand_include):
                     continue
             if apply_must_have_filter(status) and intent.must_have:
-                if not self._matches_all(haystack, intent.must_have):
+                if not self._matches_all_must_have(haystack, intent.must_have, use_tr_variants):
                     continue
 
             if apply_budget_filter(status):
@@ -235,3 +250,18 @@ class RankingFilter:
         if not cleaned:
             return True
         return all(term.lower() in haystack for term in cleaned)
+
+    @classmethod
+    def _matches_all_must_have(
+        cls, haystack: str, terms: list[str], use_tr_variants: bool
+    ) -> bool:
+        cleaned = [term for term in terms if term.strip()]
+        if not cleaned:
+            return True
+        if not use_tr_variants:
+            return cls._matches_all(haystack, cleaned)
+        for term in cleaned:
+            variants = _MUST_HAVE_VARIANTS.get(term.lower(), (term,))
+            if not any(variant.lower() in haystack for variant in variants):
+                return False
+        return True

@@ -1,0 +1,22 @@
+# Render Blueprint — https://render.com/docs/blueprint-spec
+# If the service was created manually, mirror buildCommand/startCommand in the dashboard.
+services:
+  - type: web
+    name: ecommerce-agent
+    runtime: python
+    plan: free
+    buildCommand: pip install -r requirements.txt && pip install -e .
+    startCommand: gunicorn --bind 0.0.0.0:$PORT --workers 2 --timeout 120 shopping_search_agent.chat_app:app
+    envVars:
+      - key: PYTHON_VERSION
+        value: "3.12.8"
+      - key: FLASK_SECRET_KEY
+        generateValue: true
+      - key: SERP_API_KEY
+        sync: false
+      - key: OPENAI_API_KEY
+        sync: false
+      - key: OPENAI_MODEL
+        value: gpt-4o-mini
+      - key: LLM_PROVIDER
+        value: openai
