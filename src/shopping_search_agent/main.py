@@ -6,7 +6,7 @@ import sys
 
 from .agent import ShoppingSearchAgent
 from .config import Settings
-from .search import SerpApiSearchError
+from .serpapi_client import SerpApiSearchError
 
 
 def parse_args() -> argparse.Namespace:

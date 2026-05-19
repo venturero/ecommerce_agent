@@ -17,6 +17,8 @@ class LLMClient(ABC):
 
 
 class OpenAILLMClient(LLMClient):
+    TEMPERATURE = 0
+
     def __init__(self, settings: Settings) -> None:
         from openai import OpenAI
 
@@ -32,6 +34,7 @@ class OpenAILLMClient(LLMClient):
                 {"role": "system", "content": system_prompt},
                 {"role": "user", "content": user_prompt},
             ],
+            temperature=self.TEMPERATURE,
             text={"format": {"type": "json_object"}},
         )
         return json.loads(response.output_text)
@@ -43,6 +46,7 @@ class OpenAILLMClient(LLMClient):
                 {"role": "system", "content": system_prompt},
                 {"role": "user", "content": user_prompt},
             ],
+            temperature=self.TEMPERATURE,
         )
         return response.output_text.strip()
 

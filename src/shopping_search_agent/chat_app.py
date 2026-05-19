@@ -8,7 +8,7 @@ from flask import Flask, jsonify, render_template_string, request, session
 
 from .agent import ShoppingSearchAgent
 from .config import Settings
-from .search import SerpApiSearchError
+from .serpapi_client import SerpApiSearchError
 
 
 HTML_PAGE = """
@@ -83,7 +83,7 @@ HTML_PAGE = """
           if (!res.ok) {
             appendMessage("bot", data.error || "Request failed.");
           } else {
-            appendMessage("bot", data.reply || "No response.");
+            appendMessage("bot", data.message || "No response.");
           }
         } catch (err) {
           appendMessage("bot", `Error: ${String(err)}`);
@@ -142,10 +142,10 @@ def _is_compare_or_recommend_query(user_query: str) -> bool:
 
 
 def _build_contextual_query(user_query: str, previous_response: dict) -> str:
-    intent = previous_response.get("understood_intent", {}) or {}
-    product_type = str(intent.get("product_type") or "").strip()
-    attributes = intent.get("attributes") or {}
-    budget = intent.get("budget")
+    constraints = previous_response.get("constraints", {}) or {}
+    product_type = str(constraints.get("product_type") or "").strip()
+    attributes = constraints.get("attributes") or {}
+    budget = constraints.get("budget")
 
     attr_text = ", ".join(f"{k}={v}" for k, v in attributes.items()) if attributes else ""
     context_parts = []
@@ -153,6 +153,10 @@ def _build_contextual_query(user_query: str, previous_response: dict) -> str:
         context_parts.append(f"product_type={product_type}")
     if attr_text:
         context_parts.append(f"attributes={attr_text}")
+    for key in ("brand_include", "brand_exclude", "must_have", "nice_to_have"):
+        values = constraints.get(key) or []
+        if values:
+            context_parts.append(f"{key}={', '.join(str(v) for v in values)}")
     if budget:
         context_parts.append(f"budget={budget}")
     context = "; ".join(context_parts) if context_parts else "same product context as previous turn"
@@ -160,7 +164,7 @@ def _build_contextual_query(user_query: str, previous_response: dict) -> str:
 
 
 def _answer_follow_up_from_previous(user_query: str, previous_response: dict) -> str:
-    links = previous_response.get("recommended_links", []) or []
+    links = previous_response.get("shortlist", []) or []
     if not links:
         return "I do not have previous product options in context yet. Please ask for products first."
 
@@ -186,22 +190,52 @@ def _answer_follow_up_from_previous(user_query: str, previous_response: dict) ->
     return "\n".join(lines)
 
 
-def _format_chat_reply(response: dict) -> str:
-    intent = response.get("understood_intent", {}) or {}
-    links = response.get("recommended_links", []) or []
+def _build_ui_message(response: dict) -> str:
+    if response.get("route") != "shopping":
+        return str(response.get("message") or "I can help with product search requests.")
 
-    product_type = str(intent.get("product_type") or "product")
-    attributes = intent.get("attributes") or {}
-    budget = intent.get("budget")
+    constraints = response.get("constraints", {}) or {}
+    links = response.get("shortlist", []) or []
+
+    product_type = str(constraints.get("product_type") or "product")
+    attributes = constraints.get("attributes") or {}
+    parse_block = response.get("parse") or {}
+    budget_display = parse_block.get("budget_display")
+    budget = constraints.get("budget")
+    budget_amount = constraints.get("budget_amount")
+    budget_currency = constraints.get("budget_currency")
 
     attr_parts = [f"{k}: {v}" for k, v in attributes.items()]
     attr_text = ", ".join(attr_parts) if attr_parts else "no specific attributes"
-    budget_text = str(budget) if budget else "no fixed budget"
+    if budget_display:
+        budget_text = str(budget_display)
+    elif budget_amount is not None and budget_currency:
+        budget_text = f"Budget: {budget_amount} {budget_currency}"
+    elif budget:
+        budget_text = str(budget)
+    else:
+        budget_text = "no fixed budget"
+    brand_include = constraints.get("brand_include") or []
+    must_have = constraints.get("must_have") or []
+    constraint_bits: list[str] = [attr_text, f"budget: {budget_text}"]
+    if brand_include:
+        constraint_bits.append(f"brands: {', '.join(str(b) for b in brand_include)}")
+    if must_have:
+        constraint_bits.append(f"must have: {', '.join(str(m) for m in must_have)}")
 
     lines: list[str] = []
+    agent_message = str(response.get("message") or "").strip()
+    clarifications = parse_block.get("clarification_questions") or []
+    if agent_message:
+        lines.append(agent_message)
+        lines.append("")
+    elif clarifications:
+        lines.append(" ".join(str(q) for q in clarifications))
+        lines.append("")
+
     lines.append(
         f"I found {len(links)} options for {product_type} "
-        f"({attr_text}, budget: {budget_text})."
+        f"({'; '.join(constraint_bits)})."
     )
     lines.append("")
     lines.append("Top picks:")
@@ -228,6 +262,19 @@ def _format_chat_reply(response: dict) -> str:
     return "\n".join(lines).strip()
 
 
+def _attach_ui_message(response: dict) -> dict:
+    enriched = dict(response)
+    enriched["message"] = _build_ui_message(response)
+    return enriched
+
+
+def _follow_up_response(user_query: str, previous_response: dict) -> dict:
+    response = dict(previous_response)
+    response["query"] = user_query
+    response["message"] = _answer_follow_up_from_previous(user_query, previous_response)
+    return response
+
+
 @app.get("/")
 def home() -> str:
     return render_template_string(HTML_PAGE)
@@ -248,8 +295,7 @@ def api_chat():
 
     # For compare/recommendation follow-ups, answer directly from prior links.
     if follow_up and _is_compare_or_recommend_query(user_query):
-        reply = _answer_follow_up_from_previous(user_query, previous_response)
-        return jsonify({"reply": reply, "data": previous_response})
+        return jsonify(_follow_up_response(user_query, previous_response))
 
     query_to_run = (
         _build_contextual_query(user_query, previous_response) if follow_up else user_query
@@ -262,15 +308,17 @@ def api_chat():
     except Exception as err:  # pragma: no cover
         return jsonify({"error": f"Unexpected error: {err}"}), 500
 
-    if response.get("recommended_links"):
+    response = _attach_ui_message(response)
+    if response.get("route") == "shopping" and response.get("shortlist"):
         state["last_shopping_response"] = response
 
-    return jsonify({"reply": _format_chat_reply(response), "data": response})
+    return jsonify(response)
 
 
 def main() -> None:
     settings.validate()
-    app.run(host="0.0.0.0", port=5000, debug=False)
+    port = int(os.getenv("PORT", "5000"))
+    app.run(host="0.0.0.0", port=port, debug=False)
 
 
 if __name__ == "__main__":

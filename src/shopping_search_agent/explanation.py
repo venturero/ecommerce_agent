@@ -23,10 +23,13 @@ class ExplanationLayer:
             "Never claim exact stock, price, discounts, or delivery info."
         )
         user_prompt = (
-            f"Intent product_type={intent.product_type}, attributes={intent.attributes}, budget={intent.budget}, "
-            f"usage={intent.usage}\n"
+            f"Intent product_type={intent.product_type or 'unspecified'}, attributes={intent.attributes}, "
+            f"brand_include={intent.brand_include}, brand_exclude={intent.brand_exclude}, "
+            f"must_have={intent.must_have}, nice_to_have={intent.nice_to_have}, "
+            f"budget={intent.budget}, usage={intent.usage}, location={intent.location}\n"
             f"Result title={link.title}\nResult snippet={link.snippet}\n"
             f"Result domain={link.domain}\nResult url={link.url}\n"
+            f"Listed price={link.price_display}\nStock hint={link.in_stock}\n"
             "Return one concise sentence."
         )
         try:
@@ -34,6 +37,6 @@ class ExplanationLayer:
             return text.replace("\n", " ").strip()
         except Exception:
             return (
-                f"This result appears relevant to {intent.product_type} based on its title/snippet and comes from "
+                f"This result appears relevant to {intent.product_type or 'your request'} based on its title/snippet and comes from "
                 f"{link.domain}, which is often used for product discovery."
             )

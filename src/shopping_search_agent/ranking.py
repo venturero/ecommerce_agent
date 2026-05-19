@@ -3,26 +3,82 @@ from __future__ import annotations
 import re
 from urllib.parse import parse_qsl, urlencode, urlsplit, urlunsplit
 
-from .models import Intent, RankedLink, SearchResult
+from .market import (
+    exceeds_budget,
+    is_allowed_retailer_domain,
+    is_product_page,
+    is_search_or_category_page,
+    locale_url_multiplier,
+    market_for_search,
+    price_exceeds_budget,
+)
+from .models import Intent, ParseMeta, RankedLink, SearchResult
+from .parse_policy import (
+    apply_brand_exclude_filter,
+    apply_brand_include_filter,
+    apply_budget_filter,
+    apply_must_have_filter,
+    apply_strict_score_boosts,
+)
 
 
 class RankingFilter:
     TRUSTED_DOMAIN_WEIGHTS = {
-        "trendyol.com": 1.6,
-        "amazon.com": 1.6,
-        "hepsiburada.com": 1.5,
-        "n11.com": 1.4,
-        "mediamarkt.com.tr": 1.4,
-        "nike.com": 1.5,
-        "adidas.com": 1.5,
+        "amazon.com.tr": 1.7,
+        "trendyol.com": 1.65,
+        "amazon.com": 1.2,
     }
     SPAM_TERMS = {"seo", "backlink", "coupon code generator", "free traffic", "sponsored post"}
+    ENGINE_WEIGHTS = {
+        "trendyol": 1.3,
+        "amazon": 1.25,
+        "google_shopping": 1.05,
+        "google_immersive": 1.0,
+        "google": 0.9,
+    }
 
-    def rank(self, intent: Intent, results: list[SearchResult], top_k: int) -> list[RankedLink]:
+    def rank(
+        self,
+        intent: Intent,
+        results: list[SearchResult],
+        top_k: int,
+        parse_meta: ParseMeta,
+    ) -> list[RankedLink]:
+        market = market_for_search(intent)
+        status = parse_meta.status
         deduped = self._dedupe(results)
         scored: list[RankedLink] = []
         for item in deduped:
-            score = self._score(intent, item)
+            if not is_allowed_retailer_domain(item.domain, market.country_code):
+                continue
+            if item.in_stock is False:
+                continue
+
+            haystack = self._result_haystack(item)
+
+            if apply_brand_exclude_filter(status) and self._matches_any(haystack, intent.brand_exclude):
+                continue
+            if apply_brand_include_filter(status) and intent.brand_include:
+                if not self._matches_any(haystack, intent.brand_include):
+                    continue
+            if apply_must_have_filter(status) and intent.must_have:
+                if not self._matches_all(haystack, intent.must_have):
+                    continue
+
+            if apply_budget_filter(status):
+                if price_exceeds_budget(
+                    item.extracted_price,
+                    item.price_currency,
+                    intent.budget_amount,
+                    intent.budget_currency,
+                ):
+                    continue
+                if item.extracted_price is None and exceeds_budget(
+                    haystack, intent.budget_amount, intent.budget_currency
+                ):
+                    continue
+
+            score = self._score(intent, item, market, parse_meta)
             if score <= 0:
                 continue
             scored.append(
@@ -32,10 +88,57 @@ class RankingFilter:
                     domain=item.domain,
                     snippet=item.snippet,
                     score=round(score, 4),
+                    source_engine=item.source_engine,
+                    extracted_price=item.extracted_price,
+                    price_currency=item.price_currency,
+                    price_display=item.price_display,
+                    in_stock=item.in_stock,
+                    merchant=item.merchant,
                 )
             )
         scored.sort(key=lambda x: x.score, reverse=True)
-        return scored[:top_k]
+        return self._select_diverse(scored, top_k)
+
+    def _select_diverse(self, ranked: list[RankedLink], top_k: int) -> list[RankedLink]:
+        if not ranked:
+            return []
+
+        selected: list[RankedLink] = []
+        per_domain: dict[str, int] = {}
+        used_urls: set[str] = set()
+
+        def retailer_bucket(link: RankedLink) -> str:
+            host = link.domain.lower()
+            if "trendyol.com" in host:
+                return "trendyol"
+            return "amazon"
+
+        for link in ranked:
+            if len(selected) >= top_k:
+                break
+            key = retailer_bucket(link)
+            if per_domain.get(key, 0) >= 1:
+                continue
+            if link.url in used_urls:
+                continue
+            selected.append(link)
+            per_domain[key] = per_domain.get(key, 0) + 1
+            used_urls.add(link.url)
+
+        max_per_retailer = max(3, top_k // 2)
+        for link in ranked:
+            if len(selected) >= top_k:
+                break
+            if link.url in used_urls:
+                continue
+            key = retailer_bucket(link)
+            if per_domain.get(key, 0) >= max_per_retailer:
+                continue
+            selected.append(link)
+            per_domain[key] = per_domain.get(key, 0) + 1
+            used_urls.add(link.url)
+
+        return selected[:top_k]
 
     def _dedupe(self, results: list[SearchResult]) -> list[SearchResult]:
         seen: set[str] = set()
@@ -53,24 +156,47 @@ class RankingFilter:
     def _canonicalize_url(url: str) -> str:
         split = urlsplit(url)
         cleaned_query = urlencode(
-            [(k, v) for (k, v) in parse_qsl(split.query, keep_blank_values=True) if not k.startswith("utm_")]
+            [
+                (k, v)
+                for (k, v) in parse_qsl(split.query, keep_blank_values=True)
+                if not k.startswith("utm_") and k.lower() not in ("gads", "ref", "srsltid")
+            ]
         )
         return urlunsplit((split.scheme, split.netloc, split.path, cleaned_query, split.fragment))
 
-    def _score(self, intent: Intent, item: SearchResult) -> float:
+    def _score(self, intent: Intent, item: SearchResult, market, parse_meta: ParseMeta) -> float:
         haystack = f"{item.title} {item.snippet}".lower()
         score = 1.0
 
-        product_tokens = re.findall(r"[a-z0-9]+", intent.product_type.lower())
-        token_hits = sum(1 for t in product_tokens if t in haystack)
-        score += min(2.5, 0.5 * token_hits)
+        if intent.product_type:
+            product_tokens = re.findall(r"[a-z0-9]+", intent.product_type.lower())
+            token_hits = sum(1 for t in product_tokens if t in haystack)
+            score += min(2.5, 0.5 * token_hits)
 
         for attr in intent.attributes:
             if attr.lower() in haystack:
                 score += 0.35
 
-        domain_weight = self._domain_weight(item.domain)
-        score *= domain_weight
+        if apply_strict_score_boosts(parse_meta.status):
+            for term in intent.must_have:
+                if term.lower() in haystack:
+                    score += 0.4
+            for term in intent.nice_to_have:
+                if term.lower() in haystack:
+                    score += 0.25
+            for brand in intent.brand_include:
+                if brand.lower() in haystack:
+                    score += 0.5
+
+        score *= self._domain_weight(item.domain)
+        score *= locale_url_multiplier(item.url, market)
+        score *= self._url_kind_multiplier(item.url)
+        score *= self.ENGINE_WEIGHTS.get(item.source_engine, 1.0)
+
+        if item.extracted_price is not None:
+            score += 0.5
+        if item.in_stock is True:
+            score += 0.35
 
         lowered = haystack.lower()
         if any(term in lowered for term in self.SPAM_TERMS):
@@ -81,8 +207,31 @@ class RankingFilter:
 
         return score
 
+    @staticmethod
+    def _url_kind_multiplier(url: str) -> float:
+        if is_product_page(url):
+            return 1.6
+        if is_search_or_category_page(url):
+            return 0.25
+        return 0.9
+
     def _domain_weight(self, domain: str) -> float:
         for trusted, weight in self.TRUSTED_DOMAIN_WEIGHTS.items():
             if domain.endswith(trusted):
                 return weight
         return 1.0
+
+    @staticmethod
+    def _result_haystack(item: SearchResult) -> str:
+        return f"{item.title} {item.snippet} {item.merchant or ''} {item.price_display or ''}".lower()
+
+    @staticmethod
+    def _matches_any(haystack: str, terms: list[str]) -> bool:
+        return any(term.lower() in haystack for term in terms if term.strip())
+
+    @staticmethod
+    def _matches_all(haystack: str, terms: list[str]) -> bool:
+        cleaned = [term for term in terms if term.strip()]
+        if not cleaned:
+            return True
+        return all(term.lower() in haystack for term in cleaned)
