@@ -1,0 +1,48 @@
+{
+  "version": "1",
+  "shortlist_min": 3,
+  "shortlist_max": 5,
+  "prompts": [
+    {"id": "c01", "category": "constrained", "query": "waterproof running shoes for women under $120"},
+    {"id": "c02", "category": "constrained", "query": "white armless t-shirt for men on Trendyol"},
+    {"id": "c03", "category": "constrained", "query": "noise cancelling headphones under 3000 TRY"},
+    {"id": "c04", "category": "constrained", "query": "Nike men's running shoes size 42 under 2000 TL"},
+    {"id": "c05", "category": "constrained", "query": "ergonomic office chair with lumbar support under $250"},
+    {"id": "c06", "category": "constrained", "query": "stainless steel water bottle 1L BPA-free under 500 TL"},
+    {"id": "c07", "category": "constrained", "query": "Samsung 55 inch 4K TV budget under 25000 TRY"},
+    {"id": "c08", "category": "constrained", "query": "winter jacket for men waterproof black medium Amazon"},
+    {"id": "c09", "category": "constrained", "query": "gaming laptop 16GB RAM RTX under $1500"},
+    {"id": "c10", "category": "constrained", "query": "organic cotton baby onesies pack of 3 under $40"},
+    {"id": "c11", "category": "constrained", "query": "yoga mat non-slip 6mm purple under 300 TL"},
+    {"id": "c12", "category": "constrained", "query": "mechanical keyboard hot-swappable under $100"},
+
+    {"id": "v01", "category": "vague", "query": "best shoes"},
+    {"id": "v02", "category": "vague", "query": "good headphones"},
+    {"id": "v03", "category": "vague", "query": "I need a gift"},
+    {"id": "v04", "category": "vague", "query": "nice laptop"},
+    {"id": "v05", "category": "vague", "query": "trendy clothes"},
+    {"id": "v06", "category": "vague", "query": "something for my kitchen"},
+    {"id": "v07", "category": "vague", "query": "best phone"},
+    {"id": "v08", "category": "vague", "query": "comfortable backpack"},
+    {"id": "v09", "category": "vague", "query": "home workout equipment"},
+    {"id": "v10", "category": "vague", "query": "affordable watch"},
+
+    {"id": "f01", "category": "follow_up", "query": "cheaper options", "prior_query": "waterproof running shoes for women under $120"},
+    {"id": "f02", "category": "follow_up", "query": "show me Trendyol only", "prior_query": "white armless t-shirt for men"},
+    {"id": "f03", "category": "follow_up", "query": "which one do you recommend?", "prior_query": "noise cancelling headphones under 3000 TRY"},
+    {"id": "f04", "category": "follow_up", "query": "filter to Nike brand", "prior_query": "men's running shoes under 2000 TL"},
+    {"id": "f05", "category": "follow_up", "query": "compare the top two", "prior_query": "ergonomic office chair under $250"},
+    {"id": "f06", "category": "follow_up", "query": "something in black only", "prior_query": "winter jacket for men waterproof"},
+    {"id": "f07", "category": "follow_up", "query": "lighter weight options", "prior_query": "gaming laptop 16GB RAM under $1500"},
+    {"id": "f08", "category": "follow_up", "query": "what about cheaper ones?", "prior_query": "Samsung 55 inch 4K TV under 25000 TRY"},
+
+    {"id": "e01", "category": "edge", "query": "", "expect_error": true},
+    {"id": "e02", "category": "edge", "query": "   ", "expect_error": true},
+    {"id": "e03", "category": "edge", "query": "asdfghjkl qwerty zxcvbnm product", "allow_empty_shortlist": true},
+    {"id": "e04", "category": "edge", "query": "hello how are you today", "expect_route": "chitchat"},
+    {"id": "e05", "category": "edge", "query": "tell me a joke about shopping", "expect_route": "chitchat"},
+    {"id": "e06", "category": "edge", "query": "buy iphone 99 pro max titanium 2TB free overnight", "allow_empty_shortlist": true},
+    {"id": "e07", "category": "edge", "query": "shoes", "allow_clarification": true},
+    {"id": "e08", "category": "edge", "query": "product under $0.01", "allow_empty_shortlist": true}
+  ]
+}
