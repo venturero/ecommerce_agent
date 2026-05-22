@@ -28,7 +28,7 @@ def main() -> int:
     try:
         response = agent.run(args.query)
     except SerpApiSearchError as err:
-        print(f"Search API error: {err}", file=sys.stderr)
+        print(f"Search failed: {err}", file=sys.stderr)
         return 1
     print(json.dumps(response, ensure_ascii=True, indent=2))
     return 0

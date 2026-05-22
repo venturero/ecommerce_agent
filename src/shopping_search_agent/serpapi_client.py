@@ -5,6 +5,7 @@ from typing import Any
 import requests
 
 from .config import Settings
+from .retry import call_with_retry, is_transient_request_error
 
 
 class SerpApiSearchError(RuntimeError):
@@ -13,23 +14,51 @@ class SerpApiSearchError(RuntimeError):
 
 class SerpApiClient:
     SERP_API_URL = "https://serpapi.com/search.json"
+    REQUEST_TIMEOUT = 45
 
     def __init__(self, settings: Settings) -> None:
         self._settings = settings
 
     def search(self, params: dict[str, Any]) -> dict[str, Any]:
         payload = {**params, "api_key": self._settings.serp_api_key}
-        response = requests.get(self.SERP_API_URL, params=payload, timeout=45)
-        try:
+
+        def _fetch() -> requests.Response:
+            response = requests.get(
+                self.SERP_API_URL, params=payload, timeout=self.REQUEST_TIMEOUT
+            )
             response.raise_for_status()
+            return response
+
+        try:
+            response = call_with_retry(_fetch, is_retryable=is_transient_request_error)
+        except requests.Timeout as err:
+            raise SerpApiSearchError(
+                "SerpApi request timed out. Check network connectivity and try again."
+            ) from err
+        except requests.ConnectionError as err:
+            raise SerpApiSearchError(
+                "SerpApi connection failed. Check network connectivity and try again."
+            ) from err
         except requests.HTTPError as err:
-            detail = self._extract_error_detail(response)
+            http_response = err.response
+            status = http_response.status_code if http_response is not None else "unknown"
+            detail = (
+                self._extract_error_detail(http_response)
+                if http_response is not None
+                else str(err)
+            )
             raise SerpApiSearchError(
                 "SerpApi request failed. "
-                f"HTTP {response.status_code}. {detail} "
+                f"HTTP {status}. {detail} "
                 "Check SERP_API_KEY, account status, key restrictions, and quota."
             ) from err
-        return response.json()
+
+        payload = response.json()
+        api_error = payload.get("error")
+        if api_error:
+            detail = api_error if isinstance(api_error, str) else str(api_error)
+            raise SerpApiSearchError(f"SerpApi error: {detail}")
+        return payload
 
     @staticmethod
     def _extract_error_detail(response: requests.Response) -> str:

@@ -20,6 +20,12 @@ from .parse_policy import (
     apply_must_have_filter,
     apply_strict_score_boosts,
 )
+from .event_tracking import get_session_preferences
+from .preference_transparency import (
+    build_base_ranking_signals,
+    build_why_seeing_this,
+    capped_preference_boost,
+)
 from .retailer_preference import result_matches_retailer_preferences
 
 
@@ -55,9 +61,15 @@ class RankingFilter:
         results: list[SearchResult],
         top_k: int,
         parse_meta: ParseMeta,
+        session_id: str | None = None,
+        personalization_enabled: bool = True,
     ) -> list[RankedLink]:
         market = market_for_search(intent)
         status = parse_meta.status
+        use_personalization = personalization_enabled and bool(session_id)
+        preference_counts = (
+            get_session_preferences(session_id) if use_personalization else {}
+        )
         deduped = self._dedupe(results)
         use_tr_variants = market.country_code == "tr" or bool(intent.retailer_include)
         scored: list[RankedLink] = []
@@ -93,9 +105,34 @@ class RankingFilter:
                 ):
                     continue
 
-            score = self._score(intent, item, market, parse_meta)
+            base_score = self._score(intent, item, market, parse_meta)
+            pref_boost, pref_signals = (
+                capped_preference_boost(item.domain, preference_counts)
+                if use_personalization
+                else (0.0, [])
+            )
+            score = base_score + pref_boost
             if score <= 0:
                 continue
+
+            domain_weight = self._domain_weight(item.domain)
+            engine_weight = self.ENGINE_WEIGHTS.get(item.source_engine, 1.0)
+            retailer_matched = result_matches_retailer_preferences(
+                item.domain, intent.retailer_include
+            )
+            base_signals = build_base_ranking_signals(
+                intent,
+                item,
+                domain_weight=domain_weight,
+                engine_weight=engine_weight,
+                retailer_matched=retailer_matched,
+            )
+            why_seeing_this = build_why_seeing_this(
+                base_signals,
+                pref_signals,
+                personalization_enabled=use_personalization,
+            )
+
             scored.append(
                 RankedLink(
                     title=item.title,
@@ -103,6 +140,7 @@ class RankingFilter:
                     domain=item.domain,
                     snippet=item.snippet,
                     score=round(score, 4),
+                    why_seeing_this=why_seeing_this,
                     source_engine=item.source_engine,
                     extracted_price=item.extracted_price,
                     price_currency=item.price_currency,

@@ -41,14 +41,21 @@ class MultiEngineRetriever:
         primary_query: str,
         trendyol_queries: list[str],
         parse_status: ParseStatus,
+        session_id: str | None = None,
     ) -> list[SearchResult]:
         results: list[SearchResult] = []
+        serp_errors: list[str] = []
         only = retailer_only(intent)
         run_amazon = self._settings.use_amazon_search and only != "trendyol"
         run_trendyol = self._settings.use_trendyol_native and only != "amazon"
 
         if run_amazon:
-            results.extend(self._safe(self._search_amazon, primary_query, intent, parse_status))
+            amazon_results, err = self._safe_serpapi(
+                lambda: self._search_amazon(primary_query, intent, parse_status, session_id)
+            )
+            results.extend(amazon_results)
+            if err:
+                serp_errors.append(err)
 
         trendyol_results: list[SearchResult] = []
         if run_trendyol:
@@ -66,17 +73,25 @@ class MultiEngineRetriever:
         )
         if need_trendyol_fallback:
             for query in trendyol_queries[:2]:
-                results.extend(
-                    self._safe(self._search_trendyol_serpapi_fallback, query, intent, parse_status)
+                fallback_results, err = self._safe_serpapi(
+                    lambda q=query: self._search_trendyol_serpapi_fallback(
+                        q, intent, parse_status, session_id
+                    )
                 )
+                results.extend(fallback_results)
+                if err:
+                    serp_errors.append(err)
 
+        if not results and serp_errors:
+            raise SerpApiSearchError(serp_errors[-1])
         return results
 
-    def _safe(self, fn, query: str, intent: Intent, parse_status: ParseStatus) -> list[SearchResult]:
+    @staticmethod
+    def _safe_serpapi(callable_fn) -> tuple[list[SearchResult], str | None]:
         try:
-            return fn(query, intent, parse_status)
-        except (SerpApiSearchError, requests.RequestException):
-            return []
+            return callable_fn(), None
+        except SerpApiSearchError as err:
+            return [], str(err)
 
     def _safe_trendyol(self, query: str, intent: Intent, parse_status: ParseStatus) -> list[SearchResult]:
         try:
@@ -85,7 +100,11 @@ class MultiEngineRetriever:
             return []
 
     def _search_trendyol_serpapi_fallback(
-        self, query: str, intent: Intent, parse_status: ParseStatus
+        self,
+        query: str,
+        intent: Intent,
+        parse_status: ParseStatus,
+        session_id: str | None,
     ) -> list[SearchResult]:
         """SerpApi fallback: Google Shopping results from Trendyol merchants (immersive resolve)."""
         market = market_for_search(intent)
@@ -126,7 +145,12 @@ class MultiEngineRetriever:
             extensions = " ".join(item.get("extensions") or [])
 
             url = self._pick_trendyol_shopping_url(
-                item, intent, parse_status, title=title, merchant=merchant
+                item,
+                intent,
+                parse_status,
+                session_id=session_id,
+                title=title,
+                merchant=merchant,
             )
             if not url:
                 continue
@@ -157,6 +181,7 @@ class MultiEngineRetriever:
         intent: Intent,
         parse_status: ParseStatus,
         *,
+        session_id: str | None,
         title: str,
         merchant: str | None,
     ) -> str | None:
@@ -173,6 +198,7 @@ class MultiEngineRetriever:
                 str(token),
                 intent,
                 parse_status=parse_status,
+                session_id=session_id,
                 title=title,
                 merchant_hint=merchant or "Trendyol",
             )
@@ -180,7 +206,14 @@ class MultiEngineRetriever:
                 return str(resolved["url"])
         return None
 
-    def _search_amazon(self, query: str, intent: Intent, parse_status: ParseStatus) -> list[SearchResult]:
+    def _search_amazon(
+        self,
+        query: str,
+        intent: Intent,
+        parse_status: ParseStatus,
+        session_id: str | None,
+    ) -> list[SearchResult]:
+        _ = session_id
         market = market_for_search(intent)
         domain = amazon_domain_for(market)
         payload = self._client.search(

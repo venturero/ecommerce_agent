@@ -51,6 +51,7 @@ class Settings:
     llm_provider: str = "openai"
     openai_api_key: str = ""
     openai_model: str = "gpt-4o-mini"
+    openai_request_timeout: float = 15.0
     shopping_results_per_query: int = 12
     max_recommended_links: int = 12
     min_recommended_links: int = 5
@@ -71,6 +72,9 @@ class Settings:
         self.llm_provider = os.getenv("LLM_PROVIDER", self.llm_provider)
         self.openai_api_key = os.getenv("OPENAI_API_KEY", self.openai_api_key)
         self.openai_model = os.getenv("OPENAI_MODEL", self.openai_model)
+        self.openai_request_timeout = float(
+            os.getenv("OPENAI_REQUEST_TIMEOUT", str(self.openai_request_timeout))
+        )
         self.shopping_results_per_query = int(
             os.getenv("SHOPPING_RESULTS_PER_QUERY", str(self.shopping_results_per_query))
         )

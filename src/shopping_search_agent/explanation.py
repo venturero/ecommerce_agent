@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from .llm import LLMClient
+from .llm import LLMClient, LLMTimeoutError
 from .models import Intent, RankedLink
 
 
@@ -10,9 +10,18 @@ class ExplanationLayer:
 
     def enrich(self, intent: Intent, links: list[RankedLink]) -> list[RankedLink]:
         enriched: list[RankedLink] = []
+        llm_available = True
         for link in links:
-            explanation = self._generate_explanation(intent, link)
-            link.explanation = explanation
+            if llm_available:
+                try:
+                    link.explanation = self._generate_explanation(intent, link)
+                except LLMTimeoutError:
+                    llm_available = False
+                    link.explanation = ""
+                except Exception:
+                    link.explanation = self._fallback_explanation(intent, link)
+            else:
+                link.explanation = ""
             enriched.append(link)
         return enriched
 
@@ -32,11 +41,12 @@ class ExplanationLayer:
             f"Listed price={link.price_display}\nStock hint={link.in_stock}\n"
             "Return one concise sentence."
         )
-        try:
-            text = self._llm.complete_text(system_prompt, user_prompt)
-            return text.replace("\n", " ").strip()
-        except Exception:
-            return (
-                f"This result appears relevant to {intent.product_type or 'your request'} based on its title/snippet and comes from "
-                f"{link.domain}, which is often used for product discovery."
-            )
+        text = self._llm.complete_text(system_prompt, user_prompt)
+        return text.replace("\n", " ").strip()
+
+    @staticmethod
+    def _fallback_explanation(intent: Intent, link: RankedLink) -> str:
+        return (
+            f"This result appears relevant to {intent.product_type or 'your request'} based on its title/snippet and comes from "
+            f"{link.domain}, which is often used for product discovery."
+        )

@@ -10,14 +10,18 @@ from .market import (
 )
 from .models import Intent, ParseStatus
 from .parse_policy import apply_budget_filter
-from .serpapi_client import SerpApiClient
+from .serpapi_client import SerpApiClient, SerpApiSearchError
 
 
 class ImmersiveProductResolver:
     def __init__(self, client: SerpApiClient, max_lookups: int) -> None:
         self._client = client
         self._max_lookups = max_lookups
-        self._calls = 0
+        self._calls_by_session: dict[str, int] = {}
+
+    @staticmethod
+    def _session_key(session_id: str | None) -> str:
+        return session_id or "_anonymous"
 
     def resolve_store(
         self,
@@ -25,23 +29,28 @@ class ImmersiveProductResolver:
         intent: Intent,
         *,
         parse_status: ParseStatus,
+        session_id: str | None = None,
         title: str = "",
         merchant_hint: str | None = None,
     ) -> dict | None:
-        if self._calls >= self._max_lookups:
+        key = self._session_key(session_id)
+        if self._calls_by_session.get(key, 0) >= self._max_lookups:
             return None
-        self._calls += 1
+        self._calls_by_session[key] = self._calls_by_session.get(key, 0) + 1
 
         market = market_for_search(intent)
-        payload = self._client.search(
-            {
-                "engine": "google_immersive_product",
-                "page_token": token,
-                "more_stores": "true",
-                "hl": market.language,
-                "gl": market.country_code,
-            }
-        )
+        try:
+            payload = self._client.search(
+                {
+                    "engine": "google_immersive_product",
+                    "page_token": token,
+                    "more_stores": "true",
+                    "hl": market.language,
+                    "gl": market.country_code,
+                }
+            )
+        except SerpApiSearchError:
+            return None
         stores = payload.get("product_results", {}).get("stores") or payload.get("stores") or []
         best: dict | None = None
         best_score = -1.0

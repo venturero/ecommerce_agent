@@ -65,6 +65,7 @@ class RankedLink:
     snippet: str
     score: float
     explanation: str = ""
+    why_seeing_this: str = ""
     source_engine: SearchEngine = "google"
     extracted_price: float | None = None
     price_currency: str | None = None

@@ -84,6 +84,8 @@ def shortlist_from_links(links: list[RankedLink]) -> list[dict]:
             "price_currency": item.price_currency,
             "in_stock": item.in_stock,
             "explanation": item.explanation,
+            "why_seeing_this": item.why_seeing_this,
+            "snippet": item.snippet,
         }
         for item in links
     ]

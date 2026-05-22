@@ -26,7 +26,13 @@ class ShoppingSearchAgent:
         self._ranker = RankingFilter()
         self._explainer = ExplanationLayer(self._llm)
 
-    def run(self, user_query: str) -> dict:
+    def run(
+        self,
+        user_query: str,
+        session_id: str | None = None,
+        *,
+        personalization_enabled: bool = True,
+    ) -> dict:
         route = self._router.route(user_query)
         if route != "shopping":
             return to_public_response(
@@ -45,6 +51,7 @@ class ShoppingSearchAgent:
             primary_query=primary_query,
             trendyol_queries=trendyol_queries,
             parse_status=parse_meta.status,
+            session_id=session_id,
         )
         search_results = self._stock.annotate(search_results)
         search_results, parse_meta = self._relevance.filter(intent, search_results, parse_meta)
@@ -53,6 +60,8 @@ class ShoppingSearchAgent:
             search_results,
             top_k=self._settings.max_recommended_links,
             parse_meta=parse_meta,
+            session_id=session_id,
+            personalization_enabled=personalization_enabled,
         )
         explained = self._explainer.enrich(intent, ranked)
 
