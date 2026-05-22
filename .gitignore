@@ -1,6 +1,9 @@
 # Local environment variables and secrets
 .env
 
+# SQLite event / preference store
+data.db
+
 # Python caches and virtual environments
 __pycache__/
 *.py[cod]
@@ -15,3 +18,7 @@ dist/
 # Test / tooling caches
 .pytest_cache/
 .mypy_cache/
+
+# Eval run artifacts (keep dataset + rubric in git)
+eval/results/*/
+!eval/results/.gitkeep

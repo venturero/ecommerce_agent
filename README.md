@@ -159,6 +159,7 @@ Copy [`.env.example`](.env.example) to `.env` for local development. On hosted p
 | `TRENDYOL_FALLBACK_MIN_RESULTS` | `3` | Native result count before fallback. |
 | `TRENDYOL_MAX_RESULTS_PER_QUERY` | `24` | Max Trendyol results per query. |
 | `TRENDYOL_REQUEST_TIMEOUT` | `30` | Trendyol HTTP timeout (seconds). |
+| `EVENT_DB_PATH` | `data.db` | SQLite file for events, preferences, and query metrics. |
 
 ## Run (JSON CLI output)
 
@@ -169,6 +170,57 @@ python -m shopping_search_agent.main 'I need waterproof running shoes for women 
 Expected output is the unified JSON schema above (constraints, market, parse, shortlist, message, disclaimer).
 
 PowerShell note: prefer single quotes around queries with `$` so budget values are not expanded as shell variables.
+
+## Offline evaluation (Day 8 harness)
+
+Fixed dataset: [`eval/prompts.json`](eval/prompts.json) (38 prompts: constrained, vague, follow-up, edge).
+
+Human rubric: [`eval/RUBRIC.md`](eval/RUBRIC.md) (relevance, clarity, usefulness, diversity, trust).
+
+Requires `SERP_API_KEY` (and `OPENAI_API_KEY` recommended). Results are written under `eval/results/<run_id>/`.
+
+```bash
+# Full eval (live SerpApi + LLM calls — takes several minutes)
+python -m shopping_search_agent.eval_runner run
+
+# Quick smoke test (first 3 prompts)
+python -m shopping_search_agent.eval_runner run --limit 3
+
+# One category only
+python -m shopping_search_agent.eval_runner run --category constrained
+
+# Compare two runs (e.g. before/after a ranking change)
+python -m shopping_search_agent.eval_runner compare eval/results/RUN_A eval/results/RUN_B
+```
+
+Outputs per run:
+
+- `summary.json` — all prompts, automated check results, shortlist URLs
+- `report.txt` — human-readable PASS/FAIL list
+- `responses/<id>.json` — full response per prompt
+
+Automated checks: response schema, shortlist size 3–5 (shopping), heuristic hallucination phrases in explanations.
+
+## Launch metrics (Day 14)
+
+Interaction events (`impression`, `product_click`, `message_send`) and chat request outcomes (latency, failures, empty shortlists) are stored in SQLite (`EVENT_DB_PATH`, default `data.db`).
+
+After running the chat app, inspect aggregated metrics:
+
+```bash
+python -m shopping_search_agent.metrics_report report
+python -m shopping_search_agent.metrics_report report --json --out eval/results/metrics_summary.json
+```
+
+Backup or export the database (non-destructive copy):
+
+```bash
+python -m shopping_search_agent.metrics_report backup
+python -m shopping_search_agent.metrics_report backup --dest backups/data-copy.db
+python -m shopping_search_agent.metrics_report export --out metrics_export.json
+```
+
+The report includes CTR, follow-up rate (by session and by request), latency averages/P95, top failure queries, slowest queries, and low-CTR sessions.
 
 ## Run (Chat UX)
 
@@ -183,6 +235,19 @@ Then open:
 - [http://localhost:5000](http://localhost:5000)
 
 The chat UI displays the `message` field from the same unified JSON returned by `/api/chat` (no separate `reply`/`data` wrapper).
+
+**Health check:** `GET /health` returns `{"status": "ok"}` (no external API calls).
+
+## Tests and CI
+
+```bash
+pip install -r requirements.txt -r requirements-dev.txt
+pip install -e .
+ruff check src tests
+pytest
+```
+
+GitHub Actions (`.github/workflows/ci.yml`) runs the same lint and tests on push and pull requests.
 
 ## Production deployment
 
@@ -282,4 +347,5 @@ git push
 - `src/shopping_search_agent/agent.py` - end-to-end orchestration
 - `src/shopping_search_agent/main.py` - executable CLI
 - `src/shopping_search_agent/chat_app.py` - Flask chat UI + `/api/chat` endpoint
+- `src/shopping_search_agent/metrics_report.py` - launch metrics report, DB backup, export
 - `Procfile` - production web process (`gunicorn`)
